@@ -5,9 +5,8 @@
 
 :- include(calendar12(include/common)).
 
-:- mutex_create(mongo_mutex).
-
 connect_to_postal_service(Host, Port) :-
+    mutex_create(mongo_mutex),
     setup_call_catcher_cleanup(
         tcp_socket(Socket),
         tcp_connect(Socket, Host:Port),
@@ -49,20 +48,52 @@ handle_client_response(In, Out, Collection, Bytes) :-
     core:atom_chars(JsonAtom, BytesJson),
     json:doc_json(Doc, JsonAtom),
     log('Parsed: ~w', [Doc]),
-    handle_action_walk(Collection, Doc),
+    handle_action_walk(postal(In,Out), Collection, Doc),
     handle_service(In, Out, Collection).
 handle_client_response(In, Out, Collection, Bytes) :-
     log('Unhandled: ~w', [Bytes]),
     handle_service(In, Out, Collection).
 
-handle_action_walk(Collection, Doc) :-
+handle_action_walk(postal(In,Out), Collection, Doc) :-
     json_get(Doc, args, [User|_]),
     get_all_rooms(Collection, Rooms),
-    log('~w', [Rooms]).
+    move_user(Rooms, User, num-Num, Rooms1),
+    mongo:delete(Collection, []),
+    mongo:insert(Collection, [rooms-Rooms1]),
+    core:atomic_list_concat(['event: {"msg":"',User,' entered room ', Num, '"}'], Msg),
+    send_and_flush(Out, Msg).
+
+move_user(Rooms, User, num-N1, Rooms2) :-
+    remove_user_from_room(Rooms, User, num-N, Rooms1),
+    N1 is N + 1,
+    add_user_to_room(Rooms1, User, num-N1, Rooms2).
+
+add_user_to_room([[num-N,users-Users]|Rooms], User, num-N, [[num-N,users-[User|Users]]|Rooms]) :-
+    !.
+add_user_to_room([Room|Rooms], User, Num, [Room|Rooms1]) :-
+    add_user_to_room(Rooms, User, Num, Rooms1).
+
+remove_user_from_room([[num-N,users-Users]], User, num-0, [[num-N,users-Users1]]) :-
+    !,
+    try_delete(Users, User, Users1).
+remove_user_from_room([[num-N,users-Users]|Rooms], User, num-N, [[num-N,users-Users1]|Rooms]) :-
+    delete(Users, User, Users1),
+    !.
+remove_user_from_room([Room|Rooms], User, Num, [Room|Rooms1]) :-
+    remove_user_from_room(Rooms, User, Num, Rooms1).
+
+try_delete([], _, []) :- !.
+try_delete([X|Xs], X, Xs) :- !.
+try_delete([Y|Xs], X, [Y|Xs1]) :-
+    try_delete(Xs, X, Xs1).
+
+delete([X|Xs], X, Xs) :- !.
+delete([Y|Xs], X, [Y|Xs1]) :-
+    delete(Xs, X, Xs1).
 
 get_all_rooms(Collection, Rooms1) :-
     mongo:find_all(Collection, [], [], Rooms),
-    log('weeeeee~w~n', [Rooms]),
+    %log('get_all_rooms:~n~w~n', [Rooms]),
     init_rooms(Collection, Rooms, Rooms1).
 
 init_rooms(Collection, [], Rooms1) :-
@@ -81,6 +112,7 @@ create_n_rooms(N, [[num-N,users-[]]|Rooms]) :-
     N1 is N - 1,
     create_n_rooms(N1, Rooms).
 
+send_and_flush(Socket, +()) :-
 send_and_flush(Socket, Message) :-
     core:format(Socket, '~w~n', [Message]),
     core:flush_output(Socket).
@@ -92,13 +124,13 @@ log(Format, Args) :-
 
 receive_line(In, Bytes) :-
     core:get_char(In, Byte),
+    %format('~w', [Byte]),
+    %flush_output,
     receive_line_aux(In, Byte, Bytes).
 
 receive_line_aux(In, Byte, []) :-
     stop_char(Byte),
-    !,
-    core:peek_byte(In, Byte1),
-    remove_end_of_line_crap(In, Byte1).
+    !.
 receive_line_aux(In, Byte, [Byte|Bytes]) :-
     receive_line(In, Bytes).
 
