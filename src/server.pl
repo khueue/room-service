@@ -112,7 +112,6 @@ create_n_rooms(N, [[num-N,users-[]]|Rooms]) :-
     N1 is N - 1,
     create_n_rooms(N1, Rooms).
 
-send_and_flush(Socket, +()) :-
 send_and_flush(Socket, Message) :-
     core:format(Socket, '~w~n', [Message]),
     core:flush_output(Socket).
