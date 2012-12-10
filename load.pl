@@ -51,7 +51,7 @@ calendar12_test :-
 calendar12_run_server :-
     Host = localhost,
     Port = 8080,
-    core:format('~n% Starting xxxxxxx server at port ~w ...~n', [Port]),
+    core:format('~n% Connecting to Akka at port ~w ...~n', [Port]),
     server:connect_to_postal_service(Host, Port).
 
 calendar12_run_test_suite :-
